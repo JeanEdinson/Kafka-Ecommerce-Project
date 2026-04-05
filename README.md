@@ -35,21 +35,7 @@ Este enfoque replica una arquitectura moderna de datos basada en el patrón **Me
 
 ### 🔄 Flujo de Datos
 
-```text
-Producer (Python)
-        ↓
-Kafka Topic (raw_events_ecom)  →  BRONZE
-        ↓
-Stream Processor (Consumer + Producer)
-        ↓
-Kafka Topic (clean_events_ecom) → SILVER
-        ↓
-Snowflake Consumer
-        ↓
-Snowflake Tables & Views → GOLD
-        ↓
-Dashboard
-```
+![Arquitectura del proyecto](Imagenes/arquitectura.png)
 
 ---
 
@@ -95,17 +81,86 @@ Simula eventos de usuarios en una plataforma e-commerce.
 * Inclusión de datos inválidos para testing
 * Uso de `customer_id` como key para particionamiento
 
-#### Estructura del evento:
+#### producer.py:
 
-```json
-{
-  "event_id": "uuid",
-  "customer_id": "int",
-  "event_type": "view | add_to_cart | purchase",
-  "amount": "float",
-  "currency": "string",
-  "event_timestamp": "datetime"
-}
+```
+import json
+import random
+import time
+from datetime import datetime, timezone, timedelta
+import uuid
+from kafka import KafkaProducer
+
+bootstrap_server = "host.docker.internal:29092"
+topic_name = "raw_events_ecom"
+
+producer = KafkaProducer(
+    bootstrap_servers=bootstrap_server,
+    key_serializer=lambda k: k.encode("utf-8") if k else None,
+    value_serializer=lambda v: json.dumps(v).encode("utf-8")
+)
+
+VALID_EVENT_TYPES = ["PAGE_VIEW", "ADD_TO_CART", "PURCHASE"]
+INVALID_EVENT_TYPES = ["CLICK", "VIEW", "PAY"]
+
+def random_timestamp_last_6_days():
+    now = datetime.now(timezone.utc)
+
+    random_seconds = random.uniform(0, timedelta(days=6).total_seconds())
+    return now - timedelta(seconds=random_seconds)
+
+def generate_event():
+    is_invalid = random.random() < 0.25
+
+    customer_id = f"CUST_{random.randint(1,5)}"
+    event_type = random.choice(VALID_EVENT_TYPES)
+    amount = round(random.uniform(10,500),2)
+    currency = "USD"
+
+    invalid_field = None
+    if is_invalid:
+        invalid_field = random.choice([
+            "customer_id",
+            "event_type",
+            "amount",
+            "currency"
+        ])
+    
+    event = {
+        "event_id": str(uuid.uuid4()),
+        "customer_id": None if invalid_field == "customer_id" else customer_id,
+        "event_type": (
+            random.choice(INVALID_EVENT_TYPES)
+            if invalid_field == "event_type"
+            else event_type
+        ),
+        "amount": (
+            random.uniform(-500,-10)
+            if invalid_field == "amount"
+            else amount
+        ),
+        "currency": None if invalid_field == "currency" else currency,
+        "event_timestamp": random_timestamp_last_6_days().isoformat(),
+        "is_valid": not is_invalid,
+        "invalid_field": invalid_field
+    }
+
+    return event["customer_id"], event
+
+print("Starting Kafka producer...")
+
+while True:
+    key, event = generate_event()
+
+    producer.send(
+        topic=topic_name,
+        key=key,
+        value=event
+    )
+
+    print(f"Produced event | key={key} | valid={event['is_valid']}")
+
+    time.sleep(1)
 ```
 
 📌 **Importante:**
@@ -132,6 +187,68 @@ Encargado del procesamiento en tiempo real.
 * ✅ Commit manual post-procesamiento
 * ✅ Garantía de no pérdida de datos
 
+#### stream_processor.py:
+
+```
+import json
+from kafka import KafkaConsumer, KafkaProducer
+
+bootstrap_server = "host.docker.internal:29092"
+input_topic = "raw_events_ecom"
+output_topic = "clean_events_ecom"
+group_id = "silver-stream-processor"
+
+VALID_EVENT_TYPES = ["PAGE_VIEW", "ADD_TO_CART", "PURCHASE"]
+
+consumer = KafkaConsumer(
+    input_topic,
+    bootstrap_servers = bootstrap_server,
+    group_id = group_id,
+    auto_offset_reset = "earliest",
+    enable_auto_commit = False,
+    key_deserializer = lambda k: k.decode("utf-8") if k else None,
+    value_deserializer = lambda v: json.loads(v.decode("utf-8"))
+)
+
+producer = KafkaProducer(
+    bootstrap_servers=bootstrap_server,
+    key_serializer=lambda k: k.encode("utf-8") if k else None,
+    value_serializer=lambda v: json.dumps(v).encode("utf-8")
+)
+
+def is_valid_event(event):
+
+    if not event.get("customer_id"):
+        return False
+    if event.get("event_type") not in VALID_EVENT_TYPES:
+        return False
+    if event.get("amount") == None or event.get("amount") <=0:
+        return False
+    if not event.get("currency"):
+        return False
+    if event.get("is_valid") == False:
+        return False
+    return True
+
+print("Starting Silver Stream Processor...")
+
+for message in consumer:
+    key = message.key
+    event = message.value
+
+    if is_valid_event(event):
+        producer.send(
+            topic=output_topic,
+            key=key,
+            value=event
+        )
+        print(f"Forwarded | key={key} | event_type={event.get("event_type")}")
+    else:
+        print(f"Dropped | key={key} | reason=invalid")
+
+    consumer.commit()
+```
+
 ---
 
 ### 📥 Snowflake Consumer — `snowflake_consumer.py`
@@ -147,6 +264,82 @@ Carga los datos procesados en Snowflake.
 #### Optimización:
 
 * Buffer de 10 eventos antes de insertar (micro-batching)
+
+#### snowflake_consumer.py:
+
+```
+import json
+from kafka import KafkaConsumer
+import snowflake.connector
+from snowflake.connector.pandas_tools import write_pandas
+import pandas as pd
+
+bootstrap_server = "host.docker.internal:29092"
+topic_name = "clean_events_ecom"
+group_id = "snowflake-loader"
+
+snowflake_config = {
+    "user": "your_user",
+    "password": "your_password",
+    "account": "zg65971.sa-east-1.aws",
+    "warehouse": "COMPUTE_WH",
+    "database": "KAFKA_ECOMMERCE",
+    "schema": "STREAMING_ECOMMERCE"
+}
+
+batch_size = 10
+
+consumer = KafkaConsumer(
+    topic_name,
+    bootstrap_servers = bootstrap_server,
+    group_id = group_id,
+    enable_auto_commit = False,
+    auto_offset_reset = "earliest",
+    key_deserializer = lambda k: k.decode("utf-8") if k else None,
+    value_deserializer = lambda v: json.loads(v.decode("utf-8"))
+)
+
+sf_conn = snowflake.connector.connect(**snowflake_config)
+
+print("Connected to Snowflake")
+print("Starting Kafka -> Snowflake Loader...")
+
+buffer = []
+
+def flush_to_snowflake(records):
+    df_records = pd.DataFrame(records)
+    df_records.columns = [c.upper() for c in df_records.columns]
+
+    success, nchunksn, nrows, _ = write_pandas(
+        conn = sf_conn,
+        df = df_records,
+        table_name = "KAFKA_EVENTS_ECOM_SILVER"
+    )
+
+    if not success:
+        raise Exception("Snowflake insert failed")
+
+    print(f"Inserted {nrows} rows into Snowflake")
+
+for message in consumer:
+    event = message.value
+    buffer.append({
+        "event_id": event["event_id"],
+        "customer_id": event["customer_id"],
+        "event_type": event["event_type"],
+        "amount": event["amount"],
+        "currency": event["currency"],
+        "event_timestamp": event["event_timestamp"]
+    })
+
+    if len(buffer) >= batch_size:
+        try:
+            flush_to_snowflake(buffer)
+            consumer.commit()
+            buffer.clear()
+        except Exception as e:
+            print(f"Error inserting batch: {e}")
+```
 
 ---
 
