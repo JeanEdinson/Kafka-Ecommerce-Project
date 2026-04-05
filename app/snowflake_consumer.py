@@ -9,8 +9,8 @@ topic_name = "clean_events_ecom"
 group_id = "snowflake-loader"
 
 snowflake_config = {
-    "user": "edinson1404",
-    "password": "Edinson12345678",
+    "user": "your_user",
+    "password": "your_password",
     "account": "zg65971.sa-east-1.aws",
     "warehouse": "COMPUTE_WH",
     "database": "KAFKA_ECOMMERCE",
