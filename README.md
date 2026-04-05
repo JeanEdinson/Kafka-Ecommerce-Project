@@ -81,6 +81,9 @@ Simula eventos de usuarios en una plataforma e-commerce.
 * Inclusión de datos inválidos para testing
 * Uso de `customer_id` como key para particionamiento
 
+📌 **Importante:**
+El uso de `customer_id` como clave garantiza que los eventos del mismo usuario se mantengan en la misma partición (ordering).
+
 #### producer.py:
 
 ```
@@ -163,8 +166,7 @@ while True:
     time.sleep(1)
 ```
 
-📌 **Importante:**
-El uso de `customer_id` como clave garantiza que los eventos del mismo usuario se mantengan en la misma partición (ordering).
+![Arquitectura del proyecto](Imagenes/producer.png)
 
 ---
 
@@ -248,6 +250,8 @@ for message in consumer:
 
     consumer.commit()
 ```
+
+![Arquitectura del proyecto](Imagenes/processor.png)
 
 ---
 
@@ -340,6 +344,8 @@ for message in consumer:
         except Exception as e:
             print(f"Error inserting batch: {e}")
 ```
+
+![Arquitectura del proyecto](Imagenes/snowflake_consumer.png)
 
 ---
 
