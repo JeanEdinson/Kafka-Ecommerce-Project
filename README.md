@@ -372,11 +372,13 @@ Contiene eventos limpios y estructurados.
 
   * View → Add to Cart → Purchase
 
+![Snowflake](Imagenes/snowflake.png)
+
 ---
 
 ## 📈 Dashboard
 
-> *(Agregar imagen aquí)*
+![Snowflake Dashboard](Imagenes/snowflake_dashboard.png)
 
 El dashboard permite:
 
