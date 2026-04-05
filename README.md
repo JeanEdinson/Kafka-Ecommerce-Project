@@ -166,7 +166,7 @@ while True:
     time.sleep(1)
 ```
 
-![Arquitectura del proyecto](Imagenes/producer.png)
+![Producer](Imagenes/producer.png)
 
 ---
 
@@ -251,7 +251,7 @@ for message in consumer:
     consumer.commit()
 ```
 
-![Arquitectura del proyecto](Imagenes/processor.png)
+![Processor](Imagenes/processor.png)
 
 ---
 
@@ -345,7 +345,7 @@ for message in consumer:
             print(f"Error inserting batch: {e}")
 ```
 
-![Arquitectura del proyecto](Imagenes/snowflake_consumer.png)
+![Snowflake Consumer](Imagenes/snowflake_consumer.png)
 
 ---
 
