@@ -429,12 +429,6 @@ Este proyecto permitió profundizar en:
 
 ---
 
-## 👨‍💻 Autor
-
-Proyecto desarrollado como parte del aprendizaje en **Data Engineering** enfocado en arquitecturas modernas de streaming.
-
----
-
 ## ⭐ Nota Final
 
 Este proyecto representa una implementación base pero sólida de un pipeline en tiempo real, alineado con prácticas utilizadas en entornos productivos de datos.
